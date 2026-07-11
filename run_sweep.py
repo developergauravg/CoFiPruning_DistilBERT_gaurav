@@ -257,9 +257,11 @@ def main() -> None:
     lr = args.learning_rate or cfg.learning_rate
 
     for ratio in ratios:
+        ratio_dir = ensure_dir(output_root / f"cofi_{int(ratio * 100):02d}")
+
         tracker = EmissionsTracker(
+            output_dir=str(ratio_dir),
             project_name=f"CoFi_{args.task}_{int(ratio * 100)}",
-            output_dir=str(output_root / f"cofi_{int(ratio * 100)}"),
             output_file="emissions.csv",
             measure_power_secs=1,
             log_level="error",
@@ -333,11 +335,17 @@ def main() -> None:
             args.power_watts,
         )
         energy_kwh = tracker.stop()
+
+        expected_total_sparsity = l0.expected_sparsity().item()
+        expected_head_sparsity = 1.0 - l0.head_gate.expected_l0().mean().item()
+        expected_ffn_sparsity = 1.0 - l0.ffn_gate.expected_l0().mean().item()
+
         row["Energy (Joules)"] = energy_kwh * 3_600_000
         row["Target Sparsity (%)"] = as_percent(ratio)
-        row["Sparsity (%)"] = as_percent(stats.total_sparsity)
-        row["Head Sparsity (%)"] = as_percent(stats.head_sparsity)
-        row["FFN Sparsity (%)"] = as_percent(stats.ffn_sparsity)
+        row["Sparsity (%)"] = as_percent(expected_total_sparsity)
+        row["Head Sparsity (%)"] = as_percent(expected_head_sparsity)
+        row["FFN Sparsity (%)"] = as_percent(expected_ffn_sparsity)
+
 
         # --- Structural pruning step (runs after tracker.stop(), so it does not
         # change what CodeCarbon measures for this ratio). Physically prunes the
@@ -350,6 +358,8 @@ def main() -> None:
         ratio_dir = ensure_dir(output_root / f"cofi_{int(ratio * 100):02d}")
         compact_model, hard_zs = build_compact_model(student, l0, device)
         compact_metrics = evaluate_model(compact_model, eval_loader, device)
+        
+
         compact_speedup = (
             baseline_metrics.latency_s / compact_metrics.latency_s if compact_metrics.latency_s > 0 else None
         )
